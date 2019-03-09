@@ -5,9 +5,10 @@ import numpy
 from music21 import instrument, note, stream, chord
 from keras.models import Sequential
 from keras.layers import Dense
-from keras.layers import Dropout
+from keras.layers import Dropout, BatchNormalization
 from keras.layers import LSTM
 from keras.layers import Activation
+from keras.utils import plot_model
 
 def generate():
     """ Generate a piano midi file """
@@ -30,7 +31,7 @@ def prepare_sequences(notes, pitchnames, n_vocab):
     # map between notes and integers and back
     note_to_int = dict((note, number) for number, note in enumerate(pitchnames))
 
-    sequence_length = 100
+    sequence_length = 25
     network_input = []
     output = []
     for i in range(0, len(notes) - sequence_length, 1):
@@ -51,6 +52,24 @@ def prepare_sequences(notes, pitchnames, n_vocab):
 def create_network(network_input, n_vocab):
     """ create the structure of the neural network """
     model = Sequential()
+    #model.add(Embedding(input_dim=n_vocab + 1, output_dim=300))
+    model.add(LSTM(
+        512,
+        input_shape=(network_input.shape[1], 1),
+        #input_shape=(network_input.shape[1], network_input.shape[2]),
+        return_sequences=True
+    ))
+    model.add(BatchNormalization())
+    model.add(LSTM(512, return_sequences=True))
+    model.add(BatchNormalization())
+    model.add(LSTM(512))
+    model.add(BatchNormalization())
+    model.add(Dense(256))
+    model.add(BatchNormalization())
+    model.add(Dense(n_vocab))
+    model.add(Activation('softmax'))
+
+    '''model = Sequential()
     model.add(LSTM(
         512,
         input_shape=(network_input.shape[1], network_input.shape[2]),
@@ -63,39 +82,68 @@ def create_network(network_input, n_vocab):
     model.add(Dense(256))
     model.add(Dropout(0.3))
     model.add(Dense(n_vocab))
-    model.add(Activation('softmax'))
-    model.compile(loss='categorical_crossentropy', optimizer='rmsprop')
+    model.add(Activation('softmax'))'''
+
+
+    model.compile(loss='categorical_crossentropy', optimizer='adam')
+
+    plot_model(model, to_file='full_model.png', show_shapes=True)
 
     # Load the weights to each node
-    model.load_weights('weights.hdf5')
+    model.load_weights('new-weights.hdf5')
 
     return model
 
 def generate_notes(model, network_input, pitchnames, n_vocab):
     """ Generate notes from the neural network based on a sequence of notes """
     # pick a random sequence from the input as a starting point for the prediction
-    start = numpy.random.randint(0, len(network_input)-1)
+
+    start = 0
+
+    #start = numpy.random.randint(0, len(network_input)-1)
 
     int_to_note = dict((number, note) for number, note in enumerate(pitchnames))
 
     pattern = network_input[start]
-    prediction_output = []
+
+    notes = []
+    for note in network_input[start]:
+        notes.append(int_to_note[note])
+
+    create_midi(notes)
+
+    prediction_output = notes
 
     # generate 500 notes
+    i = 0
     for note_index in range(500):
         prediction_input = numpy.reshape(pattern, (1, len(pattern), 1))
         prediction_input = prediction_input / float(n_vocab)
 
         prediction = model.predict(prediction_input, verbose=0)
 
-        index = numpy.argmax(prediction)
+        candidates = [i for i in range(n_vocab)]
+
+        index = numpy.random.choice(candidates, 1, p=prediction[0])[0]
+
+        #index = numpy.argmax(prediction)
         result = int_to_note[index]
         prediction_output.append(result)
 
         pattern.append(index)
         pattern = pattern[1:len(pattern)]
+        i += 1
+
+        if pattern in network_input:
+            print("Plagiaat")
+            print(network_input.index(pattern))
+            create_midi([int_to_note[note] for note in pattern])
+            print([int_to_note[note] for note in pattern])
+            print(network_input[network_input.index(pattern)])
+            print(prediction_output)
 
     return prediction_output
+
 
 def create_midi(prediction_output):
     """ convert the output from the prediction to notes and create a midi file

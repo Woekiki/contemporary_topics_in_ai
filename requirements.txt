@@ -1,0 +1,8 @@
+PIL
+tensorflow
+keras
+music21
+h5py
+scipy
+numpy
+matplotlib
